@@ -41,7 +41,9 @@ SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "django-insecure-change-me-job")
 DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 
 ALLOWED_HOSTS = ["*"]
-
+SERVICE_API_KEY = os.getenv(
+    "SERVICE_API_KEY"
+)
 
 # ================================
 # Installed Apps

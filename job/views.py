@@ -4,6 +4,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.views import APIView
 
 from .models import Job
 from .serializers import MyJobSeralizer
@@ -14,7 +15,10 @@ from .authentication import (
     admin_only,
     role_required
 )
-
+from .permissions.internal_service import (
+    IsInternalService
+)
+from django.core.paginator import Paginator
 
 # ================================
 # CREATE JOB
@@ -98,17 +102,17 @@ def client_jobs(request):
 # ================================
 # BROWSE JOBS
 # ================================
+from django.core.paginator import Paginator
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 @freelancer_only
 def browse_jobs(request):
-
     try:
         jobs = Job.objects.filter(
             status="open"
         ).order_by("-created_at")
 
-        # Search
         keyword = request.query_params.get("q")
 
         if keyword:
@@ -116,22 +120,38 @@ def browse_jobs(request):
                 title__icontains=keyword
             )
 
+        if not jobs.exists():
+            return Response(
+                {"message": "No jobs found matching your search."},
+                status=status.HTTP_200_OK
+            )
+
+        page = request.query_params.get("page", 1)
+
+        paginator = Paginator(jobs, 5)
+
+        page_obj = paginator.get_page(page)
+
         serializer = MyJobSeralizer(
-            jobs,
+            page_obj,
             many=True
         )
 
-        return Response(
-            serializer.data,
-            status=status.HTTP_200_OK
-        )
+        return Response({
+            "total_jobs": paginator.count,
+            "total_pages": paginator.num_pages,
+            "current_page": page_obj.number,
+            "jobs": serializer.data
+        })
 
     except Exception as e:
         return Response(
-            {"error": str(e)},
+            {
+                "error": "Something went wrong.",
+                "details": str(e)
+            },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
-
 
 # ================================
 # JOB DETAIL
@@ -186,4 +206,63 @@ def delete_job(request, job_id):
         return Response(
             {"error": str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+
+# job/views.py
+
+class JobChatAccessView(APIView):
+
+    authentication_classes = []
+
+    permission_classes = [
+        IsInternalService
+    ]
+
+    def get(
+        self,
+        request,
+        job_id
+    ):
+
+        user_id = request.GET.get(
+            "user_id"
+        )
+
+        if not user_id:
+            return Response(
+                {
+                    "error":
+                    "user_id required"
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            job = Job.objects.get(
+                id=job_id
+            )
+
+        except Job.DoesNotExist:
+            return Response(
+                {
+                    "allowed": False
+                },
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        user_id = int(user_id)
+
+        allowed = (
+            job.client_id == user_id
+            or
+            job.accepted_freelancer_id
+            == user_id
+        )
+
+        return Response(
+            {
+                "allowed": allowed
+            }
         )
