@@ -1,223 +1,90 @@
-# Job Service – Freelancing Platform
+# Job Service
 
-## Overview
+Job Service owns job categories, job postings, and job lifecycle status for Labora. It serves client job management, freelancer job browsing, internal job verification, and status transitions used by applications, reviews, messaging, and admin workflows.
 
-The Job Service is a stateless microservice responsible for managing job postings in the freelancing platform. It allows clients to create jobs, freelancers to browse jobs, and admins to manage job listings.
+## Responsibilities
 
-This service integrates with an external Auth Service using JWT-based authentication.
-
----
-
-## Architecture
-
-* **Auth Service**
-
-  * Handles user authentication
-  * Issues JWT tokens signed with a private key (RS256)
-
-* **Job Service**
-
-  * Verifies JWT tokens using public key
-  * Enforces role-based access control
-  * Handles job-related operations
-
-* **API Gateway (Nginx)**
-
-  * Routes requests to appropriate services
-
----
+- Let clients create and list their jobs.
+- Let freelancers browse open jobs and view job details.
+- Manage job lifecycle states: `open`, `in_progress`, `submitted`, `completed`, and `cancelled`.
+- Expose internal job details and statistics to other services.
+- Send notifications for work submission and job completion.
 
 ## Features
 
-* Job category management
-* Client job posting
-* Freelancer job browsing
-* Job search and filtering
-* Admin job deletion
-* Stateless JWT authentication
-* Role-based access control
-
----
-
-## Authentication & Authorization
-
-### JWT Authentication
-
-* All requests require:
-
-  ```
-  Authorization: Bearer <JWT_TOKEN>
-  ```
-* Tokens are verified using **public key (RS256)**
-
-### Token Validation
-
-The service validates:
-
-* Signature
-* Expiration (`exp`)
-* Issuer (`iss`)
-* Audience (`aud`) (optional but recommended)
-
-### Example JWT Payload
-
-```
-{
-  "user_id": 5,
-  "role": "CLIENT"
-}
-```
-
----
-
-## Role-Based Access Control
-
-| Endpoint     | Allowed Role |
-| ------------ | ------------ |
-| Create Job   | CLIENT       |
-| View My Jobs | CLIENT       |
-| Browse Jobs  | FREELANCER   |
-| Delete Job   | ADMIN        |
-
----
-
-## Ownership Validation
-
-* A client can only access their own jobs
-* `client_id` is always extracted from JWT
-
-Example:
-
-```python
-if job.client_id != request.auth["user_id"]:
-    raise PermissionDenied("Unauthorized access")
-```
-
----
-
-## Request Flow
-
-1. User logs in via Auth Service
-2. JWT token is issued
-3. Client sends request with token
-4. API Gateway routes request
-5. Job Service:
-
-   * Verifies JWT
-   * Extracts user info
-   * Validates role
-   * Processes request
-
----
-
-## Tech Stack
-
-* Backend: Django, Django REST Framework
-* Authentication: JWT (RS256)
-* Database: SQLite (Dev), PostgreSQL (Prod)
-* Tools: Postman, Git, GitHub
-
----
-
-## Project Structure
-
-```
-JobService_labora/
-
-job/
- ├── models.py
- ├── serializers.py
- ├── views.py
- ├── urls.py
- ├── admin.py
- └── authentication.py
-
-JobService/
- ├── settings.py
- └── urls.py
-
-manage.py
-```
-
----
+- Client-only job creation and own-job listing.
+- Freelancer-only open-job browsing with optional `q` title search and pagination.
+- Admin-only job deletion.
+- Internal status updates used by Application Service.
+- Completion workflow that verifies the authenticated client owns the job.
 
 ## API Endpoints
 
-### Create Job (Client Only)
+Base path: `/api/`
 
+| Method | Path | Auth | Description |
+| --- | --- | --- | --- |
+| `POST` | `jobs/create/` | Client JWT | Create a job for the authenticated client. |
+| `GET` | `jobs/client/` | Client JWT | List jobs owned by the authenticated client. |
+| `GET` | `jobs/browse/` | Freelancer JWT | List open jobs. Supports `q` and `page`. |
+| `GET` | `jobs/<job_id>/` | Client, freelancer, or admin JWT | Return job details. |
+| `DELETE` | `jobs/delete/<job_id>` | Admin JWT | Delete a job. |
+| `PATCH` | `jobs/<job_id>/submit/` | Bearer JWT | Move an `in_progress` job to `submitted` and notify the client. |
+| `PATCH` | `jobs/<job_id>/complete/` | Owning client JWT | Move a `submitted` job to `completed` and notify the accepted freelancer when known. |
+
+## Internal Service Endpoints
+
+Internal endpoints use `X-Service-Key: <SERVICE_API_KEY>`.
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET` | `internal/jobs/<job_id>/` | Return `id`, `client_id`, `freelancer_id` if Application Service resolves it, and `status`. |
+| `PATCH` | `internal/jobs/<job_id>/status/` | Update job status. Sends a completion notification when status becomes `completed`. |
+| `GET` | `internal/jobs/` | Return paginated job summaries. |
+| `GET` | `internal/jobs/stats/` | Return aggregate job counts by status. |
+
+## Authentication
+
+JWT-protected APIs use the shared RS256 public key and role helpers in `job.authentication` / `job.role_permissions`. Internal APIs bypass JWT and require the service key.
+
+## Environment Variables
+
+| Variable | Purpose |
+| --- | --- |
+| `DJANGO_SECRET_KEY` | Django secret key. |
+| `DEBUG` | Enables debug mode when set to `true`. |
+| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | MySQL database configuration. |
+| `JWT_PUBLIC_KEY_PATH` | Public key used to verify Auth Service JWTs. |
+| `SERVICE_API_KEY` | Shared key for internal endpoints. |
+| `APPLICATION_SERVICE_URL` | Used to resolve accepted freelancer information. |
+| `NOTIFICATION_SERVICE_URL` | Used by shared notification client / direct notification calls. |
+| `*_SERVICE_URL` | Additional service URL settings loaded by the common configuration pattern. |
+
+## Setup
+
+```bash
+cd JobService
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+python manage.py migrate
+python manage.py runserver 8005
 ```
-POST /api/jobs/create/
-```
 
-### View My Jobs (Client)
+## Service Architecture
 
-```
-GET /api/jobs/my/
-```
+- Django project: `project`
+- App: `job`
+- Authentication: `job.authentication.CustomJWTAuthentication`
+- Internal permission: `job.permissions.internal_service.IsInternalService`
+- Outbound dependencies: Application Service and Notification Service
 
-### Browse Jobs (Freelancer)
+## Database Models
 
-```
-GET /api/jobs/browse/?q=keyword
-```
+- `Category`: job category name.
+- `Job`: stores `client_id`, title, description, category, budget range, deadline, status, and timestamps.
 
-### Job Detail
+## Notification/Event Flow
 
-```
-GET /api/jobs/<job_id>/
-```
-
-### Delete Job (Admin Only)
-
-```
-DELETE /api/jobs/<job_id>/
-```
-
----
-
-## Security Design
-
-* JWT signature verification (RS256)
-* Role-based authorization
-* Ownership validation
-* Stateless authentication
-* No trust on frontend data
-
----
-
-## Best Practices
-
-* Use HTTPS in production
-* Store secrets in `.env`
-* Never expose private key
-* Log failed authentication attempts
-* Validate all input data
-
----
-
-## Deployment Checklist
-
-* Set `DEBUG=False`
-* Use PostgreSQL
-* Configure `ALLOWED_HOSTS`
-* Enable HTTPS
-* Configure CORS
-* Use environment variables
-
----
-
-## Future Improvements
-
-* Rate limiting
-* Centralized logging
-* API Gateway authentication layer
-* Caching (Redis)
-* Event-driven communication (Kafka/RabbitMQ)
-
----
-
-## Conclusion
-
-The Job Service ensures secure and scalable job management by combining stateless authentication, strict authorization, and microservice best practices.
-
----
+- `PATCH jobs/<job_id>/submit/` sends `work_submitted` to the job client.
+- Completing a job sends `job_completed` to the accepted freelancer when Application Service returns one.
