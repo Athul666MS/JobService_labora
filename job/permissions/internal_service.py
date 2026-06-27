@@ -5,15 +5,9 @@ from secrets import compare_digest
 
 class IsInternalService(BasePermission):
 
-    def has_permission(
-        self,
-        request,
-        view
-    ):
+    def has_permission(self, request, view):
 
-        service_key = request.headers.get(
-            "X-Service-Key"
-        )
+        service_key = request.headers.get("X-Service-Key")
 
         return compare_digest(
             str(service_key),

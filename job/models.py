@@ -27,6 +27,8 @@ class Job(models.Model):
         ("in_progress", "In Progress"),
         ("completed", "Completed"),
         ("cancelled", "Cancelled"),
+    ("submitted", "Submitted"),
+
     ]
 
     status = models.CharField(max_length=20,choices=STATUS_CHOICES,default="open")
